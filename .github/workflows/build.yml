@@ -1,0 +1,53 @@
+name: build
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Build APK
+        run: gradle assembleRelease
+        env:
+          GPR_USER: ${{ github.repository_owner }}
+          GPR_KEY: ${{ secrets.GPR_KEY || secrets.GITHUB_TOKEN }}
+
+      - name: Rename APK
+        run: |
+          mkdir -p out
+          cp app/build/outputs/apk/release/*.apk out/karoo-arso-radar.apk
+          cp app/manifest.json out/manifest.json
+          cp assets/icon.png out/icon.png
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: karoo-arso-radar
+          path: out/*
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            out/karoo-arso-radar.apk
+            out/manifest.json
+            out/icon.png
