@@ -2,7 +2,7 @@
 
 Razširitev za Hammerhead Karoo (Karoo 2 in Karoo 3), ki na podatkovni strani prikaže
 **zadnjo radarsko sliko padavin nad Slovenijo** z ARSO in jo med vožnjo samodejno osvežuje.
-<img width="1300" alt="IMG_2223" src="https://github.com/user-attachments/assets/aa24535e-91cb-4c0c-863b-ebe6580b8941" />
+<img width="1000" alt="IMG_2223" src="https://github.com/user-attachments/assets/aa24535e-91cb-4c0c-863b-ebe6580b8941" />
 
 
 Vir podatkov: [ARSO – meteo.si](https://meteo.arso.gov.si/met/sl/weather/observ/radar/),
