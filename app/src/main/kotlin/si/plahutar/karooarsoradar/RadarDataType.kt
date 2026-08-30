@@ -1,7 +1,6 @@
 package si.plahutar.karooarsoradar
 
 import android.content.Context
-import android.graphics.Bitmap
 import android.util.Log
 import android.view.View
 import android.widget.RemoteViews
@@ -17,7 +16,6 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import kotlin.math.min
 import kotlin.math.roundToInt
 
 /**
@@ -31,17 +29,8 @@ class RadarDataType(extension: String) : DataTypeImpl(extension, "radar") {
     private companion object {
         const val TAG = "ArsoRadar"
 
-        /**
-         * Obrez robov slike v delezih sirine/visine, ce hoces vreci stran okolico.
-         * Privzeto pokazemo celo sliko.
-         */
-        const val CROP_LEFT = 0.0f
-        const val CROP_TOP = 0.0f
-        const val CROP_RIGHT = 0.0f
-        const val CROP_BOTTOM = 0.0f
-
         /** Priblizen delez visine polja, ki ostane sliki (ostalo vzamejo gumbi). */
-        const val IMAGE_HEIGHT_RATIO = 0.78f
+        const val IMAGE_HEIGHT_RATIO = 0.76f
     }
 
     private val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
@@ -56,7 +45,6 @@ class RadarDataType(extension: String) : DataTypeImpl(extension, "radar") {
             awaitCancellation()
         }
 
-        // Prvi prikaz: sliko potegnemo enkrat. Potem samo se na gumb.
         if (!config.preview && !RadarRepository.hasImage()) {
             scope.launch { RadarRepository.refresh() }
         }
@@ -81,7 +69,23 @@ class RadarDataType(extension: String) : DataTypeImpl(extension, "radar") {
         state: RadarRepository.State,
     ): RemoteViews {
         val views = RemoteViews(context.packageName, R.layout.radar_field)
-        val bitmap = state.frame?.let { fitToField(it, config, state.zoom) }
+
+        val source = state.frame
+        val marker = source?.let { bitmap ->
+            state.location?.let { ArsoGeo.toPixel(it.lat, it.lng, bitmap.width, bitmap.height) }
+        }
+
+        val bitmap = source?.let {
+            RadarRenderer.render(
+                source = it,
+                targetWidth = config.viewSize.first.takeIf { w -> w > 0 } ?: 400,
+                targetHeight = ((config.viewSize.second.takeIf { h -> h > 0 } ?: 400) * IMAGE_HEIGHT_RATIO)
+                    .roundToInt(),
+                zoom = state.zoom,
+                center = marker,
+                drawMarker = true,
+            )
+        }
 
         if (bitmap != null) {
             views.setImageViewBitmap(R.id.radar_image, bitmap)
@@ -102,17 +106,16 @@ class RadarDataType(extension: String) : DataTypeImpl(extension, "radar") {
             views.setViewVisibility(R.id.radar_status, View.GONE)
         }
 
-        // Napis v kotu: med animacijo stevec slicic, sicer cas zadnjega prenosa.
         val caption = when {
             bitmap == null -> null
             state.playing && state.frameCount > 0 -> "${state.frameIndex}/${state.frameCount}"
-            state.loading -> "…"
-            state.fetchedAtMs != null -> {
-                val zoomLabel = if (state.zoom > 1f) "  ${state.zoom}x" else ""
-                timeFormat.format(Date(state.fetchedAtMs)) +
-                    (if (state.failed) " !" else "") + zoomLabel
+            else -> buildString {
+                append(state.fetchedAtMs?.let { timeFormat.format(Date(it)) } ?: "-")
+                if (state.failed) append(" !")
+                if (state.zoom > 1f) append("  ${state.zoom.roundToInt()}x")
+                // Ce smo povecali, pa markerja ni, uporabnik mora vedeti zakaj.
+                if (state.zoom > 1f && marker == null) append("  brez GPS")
             }
-            else -> null
         }
         if (caption != null) {
             views.setTextViewText(R.id.radar_caption, caption)
@@ -123,7 +126,6 @@ class RadarDataType(extension: String) : DataTypeImpl(extension, "radar") {
 
         views.setTextViewText(R.id.btn_play, if (state.playing) "■" else "▶")
 
-        // V predogledu (urejanje profila) gumbi ne smejo delovati.
         if (!config.preview) {
             views.setOnClickPendingIntent(
                 R.id.btn_zoom_out,
@@ -144,57 +146,5 @@ class RadarDataType(extension: String) : DataTypeImpl(extension, "radar") {
         }
 
         return views
-    }
-
-    /**
-     * Obreze (fiksni obrez robov + zoom na sredino) in pomanjsa sliko na velikost polja.
-     * Pomembno: bitmap potuje cez procesno mejo do Karoo OS, zato ga ne posiljamo
-     * vecjega, kot ga polje potrebuje.
-     */
-    private fun fitToField(source: Bitmap, config: ViewConfig, zoom: Float): Bitmap {
-        var working = source
-
-        // 1. fiksni obrez robov
-        val edgeWidth = (source.width * (1f - CROP_LEFT - CROP_RIGHT)).roundToInt()
-        val edgeHeight = (source.height * (1f - CROP_TOP - CROP_BOTTOM)).roundToInt()
-        if (edgeWidth in 1 until source.width || edgeHeight in 1 until source.height) {
-            working = Bitmap.createBitmap(
-                working,
-                (source.width * CROP_LEFT).roundToInt(),
-                (source.height * CROP_TOP).roundToInt(),
-                edgeWidth,
-                edgeHeight,
-            )
-        }
-
-        // 2. zoom - izrez na sredini slike
-        if (zoom > 1f) {
-            val zoomWidth = (working.width / zoom).roundToInt().coerceAtLeast(1)
-            val zoomHeight = (working.height / zoom).roundToInt().coerceAtLeast(1)
-            working = Bitmap.createBitmap(
-                working,
-                (working.width - zoomWidth) / 2,
-                (working.height - zoomHeight) / 2,
-                zoomWidth,
-                zoomHeight,
-            )
-        }
-
-        // 3. pomanjsanje na velikost polja
-        val targetWidth = config.viewSize.first.takeIf { it > 0 } ?: 400
-        val targetHeight = ((config.viewSize.second.takeIf { it > 0 } ?: 400) * IMAGE_HEIGHT_RATIO)
-            .roundToInt().coerceAtLeast(1)
-        val scale = min(
-            targetWidth.toFloat() / working.width,
-            targetHeight.toFloat() / working.height,
-        )
-        if (scale >= 1f) return working
-
-        return Bitmap.createScaledBitmap(
-            working,
-            (working.width * scale).roundToInt().coerceAtLeast(1),
-            (working.height * scale).roundToInt().coerceAtLeast(1),
-            true,
-        )
     }
 }

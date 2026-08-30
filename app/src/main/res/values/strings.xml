@@ -7,5 +7,9 @@
     <string name="loading">Nalagam radarsko sliko&#8230;</string>
     <string name="no_connection">Ni povezave</string>
     <string name="refresh">Osveži</string>
-    <string name="howto">Gumbi: − in + povečava, ▶ animacija zadnjih 90 minut, ↻ prenos nove slike.\n\nSlika se ne osvežuje sama — samo ob prvem odprtju in ko pritisneš ↻.\n\nVir podatkov: ARSO (meteo.si).</string>
+    <string name="animation_progress">Animacija %1$d/%2$d</string>
+    <string name="fetched_at">Preneseno ob %1$s</string>
+    <string name="last_attempt_failed">(zadnji poskus ni uspel)</string>
+    <string name="no_gps">(brez GPS)</string>
+    <string name="howto">Tu lahko sliko premikaš s prstom, dvojni tap približa ali oddalji.\n\nGumbi: − in + povečava, ▶ animacija zadnjih 90 minut, ↻ prenos nove slike.\n\nRdeč krogec je tvoja lokacija. Na podatkovnem polju med vožnjo se povečava reže okoli tebe.\n\nSlika se ne osvežuje sama — samo ob prvem odprtju in ko pritisneš ↻.\n\nVir podatkov: ARSO (meteo.si).</string>
 </resources>

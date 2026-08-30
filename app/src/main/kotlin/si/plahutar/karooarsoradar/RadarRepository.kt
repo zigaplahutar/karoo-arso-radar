@@ -3,6 +3,7 @@ package si.plahutar.karooarsoradar
 import android.graphics.Bitmap
 import android.util.Log
 import io.hammerhead.karooext.KarooSystemService
+import io.hammerhead.karooext.models.OnLocationChanged
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -18,7 +19,7 @@ import kotlinx.coroutines.sync.withLock
 
 /**
  * En sam vir resnice za celo aplikacijo: podatkovno polje in glavni zaslon
- * gledata isto sliko in isto stanje (zoom, animacija).
+ * gledata isto sliko, isto lokacijo in isto stanje.
  *
  * Prenos se NE dogaja sam od sebe - samo ob prvem prikazu in ob pritisku na gumb
  * za osvezitev. Ko polje ni na zaslonu, se ne dogaja nic.
@@ -27,13 +28,16 @@ object RadarRepository {
 
     private const val TAG = "ArsoRadar"
 
-    val ZOOM_LEVELS = floatArrayOf(1f, 1.5f, 2f, 3f)
+    /**
+     * Stopnje povecave. En piksel slike je ~500 m, torej je pri 8x izrez
+     * priblizno 50 km sirok - to je merilo, ki med voznjo nekaj pove.
+     */
+    val ZOOM_LEVELS = floatArrayOf(1f, 2f, 4f, 8f)
 
-    /** Koliko casa se ena slicica pokaze med animacijo. */
     private const val FRAME_DELAY_MS = 260L
-
-    /** Na zadnji (najnovejsi) slicici se animacija malo ustavi. */
     private const val LAST_FRAME_DELAY_MS = 1400L
+
+    data class Location(val lat: Double, val lng: Double)
 
     data class State(
         val frame: Bitmap? = null,
@@ -44,6 +48,7 @@ object RadarRepository {
         val zoomIndex: Int = 0,
         val frameIndex: Int = 0,
         val frameCount: Int = 0,
+        val location: Location? = null,
     ) {
         val zoom: Float get() = ZOOM_LEVELS[zoomIndex.coerceIn(0, ZOOM_LEVELS.lastIndex)]
     }
@@ -51,22 +56,33 @@ object RadarRepository {
     private val _state = MutableStateFlow(State())
     val state: StateFlow<State> = _state.asStateFlow()
 
-    /**
-     * Povezavo s Karoo sistemom postavi razsiritev (ali aplikacija, ce razsiritev
-     * se ne tece). Prenos gre prek nje, ker je to edina pot, ki dela tudi takrat,
-     * ko internet priteka prek Companion aplikacije.
-     */
     @Volatile
     var karooSystem: KarooSystemService? = null
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val mutex = Mutex()
     private var playJob: Job? = null
+    private var locationConsumerId: String? = null
 
     /** Cel GIF ostane v pomnilniku - v njem je vseh 90 minut animacije. */
     private var gifBytes: ByteArray? = null
 
     fun hasImage(): Boolean = gifBytes != null
+
+    // --- lokacija ----------------------------------------------------------
+
+    fun startLocationUpdates(system: KarooSystemService) {
+        if (locationConsumerId != null) return
+        locationConsumerId = system.addConsumer<OnLocationChanged> { event ->
+            _state.update { it.copy(location = Location(event.lat, event.lng)) }
+        }
+        Log.d(TAG, "Spremljanje lokacije vklopljeno")
+    }
+
+    fun stopLocationUpdates(system: KarooSystemService) {
+        locationConsumerId?.let { system.removeConsumer(it) }
+        locationConsumerId = null
+    }
 
     // --- ukazi z gumbov ----------------------------------------------------
 
@@ -116,10 +132,6 @@ object RadarRepository {
 
     // --- prenos ------------------------------------------------------------
 
-    /**
-     * [force] = pritisk na gumb. Brez njega se slika prenese samo, ce je se nimamo
-     * (prvi prikaz polja).
-     */
     suspend fun refresh(force: Boolean = false) {
         mutex.withLock {
             if (!force && gifBytes != null) return
@@ -144,7 +156,6 @@ object RadarRepository {
                 }
             } else {
                 Log.w(TAG, "Radarske slike ni bilo mogoce pridobiti")
-                // Staro sliko obdrzimo - bolje stara slika kot prazen zaslon.
                 _state.update { it.copy(loading = false, failed = true) }
             }
         }

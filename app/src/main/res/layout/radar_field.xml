@@ -46,6 +46,9 @@
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:layout_marginStart="4dp"
+        android:layout_marginEnd="4dp"
+        android:layout_marginBottom="10dp"
         android:orientation="horizontal">
 
         <TextView
@@ -56,8 +59,8 @@
             android:layout_weight="1"
             android:background="#26262B"
             android:gravity="center"
-            android:paddingTop="8dp"
-            android:paddingBottom="8dp"
+            android:paddingTop="11dp"
+            android:paddingBottom="11dp"
             android:text="−"
             android:textColor="#FFFFFF"
             android:textSize="20sp" />
@@ -70,8 +73,8 @@
             android:layout_weight="1"
             android:background="#26262B"
             android:gravity="center"
-            android:paddingTop="8dp"
-            android:paddingBottom="8dp"
+            android:paddingTop="11dp"
+            android:paddingBottom="11dp"
             android:text="+"
             android:textColor="#FFFFFF"
             android:textSize="20sp" />
@@ -84,8 +87,8 @@
             android:layout_weight="1"
             android:background="#26262B"
             android:gravity="center"
-            android:paddingTop="8dp"
-            android:paddingBottom="8dp"
+            android:paddingTop="11dp"
+            android:paddingBottom="11dp"
             android:text="▶"
             android:textColor="#FFFFFF"
             android:textSize="20sp" />
@@ -98,8 +101,8 @@
             android:layout_weight="1"
             android:background="#26262B"
             android:gravity="center"
-            android:paddingTop="8dp"
-            android:paddingBottom="8dp"
+            android:paddingTop="11dp"
+            android:paddingBottom="11dp"
             android:text="↻"
             android:textColor="#FFFFFF"
             android:textSize="20sp" />

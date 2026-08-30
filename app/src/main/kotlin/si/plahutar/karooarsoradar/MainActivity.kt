@@ -1,7 +1,6 @@
 package si.plahutar.karooarsoradar
 
 import android.os.Bundle
-import android.widget.ImageView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.Lifecycle
@@ -15,24 +14,25 @@ import java.util.Locale
 
 /**
  * Samostojen zaslon z radarsko sliko cez cel zaslon naprave.
- * Isti gumbi kot na podatkovnem polju, isto stanje.
+ * Tu prst dela: poteg premika, dvojni tap priblizuje, dva prsta scipata.
  */
 class MainActivity : AppCompatActivity() {
 
     private val karooSystem by lazy { KarooSystemService(this) }
     private var ownsKarooSystem = false
+    private var centeredOnce = false
     private val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        val image = findViewById<ImageView>(R.id.image)
+        val radarView = findViewById<RadarImageView>(R.id.radar_view)
         val status = findViewById<TextView>(R.id.status)
         val playButton = findViewById<TextView>(R.id.btn_play)
 
-        findViewById<TextView>(R.id.btn_zoom_out).setOnClickListener { RadarRepository.zoomOut() }
-        findViewById<TextView>(R.id.btn_zoom_in).setOnClickListener { RadarRepository.zoomIn() }
+        findViewById<TextView>(R.id.btn_zoom_out).setOnClickListener { radarView.zoomBy(0.5f) }
+        findViewById<TextView>(R.id.btn_zoom_in).setOnClickListener { radarView.zoomBy(2f) }
         playButton.setOnClickListener { RadarRepository.togglePlay() }
         findViewById<TextView>(R.id.btn_refresh).setOnClickListener { RadarRepository.refreshAsync() }
 
@@ -42,19 +42,32 @@ class MainActivity : AppCompatActivity() {
                     launch { RadarRepository.refresh() }
                 }
                 RadarRepository.state.collect { state ->
-                    image.setImageBitmap(state.frame)
-                    image.scaleX = state.zoom
-                    image.scaleY = state.zoom
+                    val frame = state.frame
+                    val marker = frame?.let { bitmap ->
+                        state.location?.let { ArsoGeo.toPixel(it.lat, it.lng, bitmap.width, bitmap.height) }
+                    }
+                    radarView.setImage(frame, marker)
+                    if (marker != null && !centeredOnce) {
+                        centeredOnce = true
+                        radarView.centerOnMarker()
+                    }
+
                     playButton.text = if (state.playing) "■" else "▶"
                     status.text = when {
-                        state.loading && state.frame == null -> getString(R.string.loading)
-                        state.frame == null -> getString(R.string.no_connection)
+                        state.loading && frame == null -> getString(R.string.loading)
+                        frame == null -> getString(R.string.no_connection)
                         state.playing && state.frameCount > 0 ->
-                            "Animacija ${state.frameIndex}/${state.frameCount}"
+                            getString(R.string.animation_progress, state.frameIndex, state.frameCount)
                         else -> {
                             val time = state.fetchedAtMs?.let { timeFormat.format(Date(it)) } ?: "-"
-                            val suffix = if (state.failed) "  (zadnji poskus ni uspel)" else ""
-                            "Preneseno ob $time$suffix"
+                            val base = getString(R.string.fetched_at, time)
+                            when {
+                                state.failed -> "$base  ${getString(R.string.last_attempt_failed)}"
+                                state.location == null -> "$base  ${getString(R.string.no_gps)}"
+                                marker == null && frame != null ->
+                                    "$base  ${ArsoGeo.describeMismatch(frame.width, frame.height)}"
+                                else -> base
+                            }
                         }
                     }
                 }
@@ -64,10 +77,10 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
-        // Ce razsiritev ne tece, poskrbimo za povezavo sami.
         if (RadarRepository.karooSystem == null) {
             karooSystem.connect()
             RadarRepository.karooSystem = karooSystem
+            RadarRepository.startLocationUpdates(karooSystem)
             ownsKarooSystem = true
         }
     }
@@ -75,6 +88,7 @@ class MainActivity : AppCompatActivity() {
     override fun onStop() {
         RadarRepository.stopPlay()
         if (ownsKarooSystem) {
+            RadarRepository.stopLocationUpdates(karooSystem)
             if (RadarRepository.karooSystem === karooSystem) {
                 RadarRepository.karooSystem = null
             }
