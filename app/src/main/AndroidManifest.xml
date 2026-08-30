@@ -35,6 +35,11 @@
                 android:resource="@xml/extension_info" />
         </service>
 
+        <!-- Gumbi v podatkovnem polju posiljajo ukaze sem -->
+        <receiver
+            android:name=".RadarCommandReceiver"
+            android:exported="false" />
+
         <!-- Od kod Karoo dobi informacije o posodobitvah (glej app/manifest.json) -->
         <meta-data
             android:name="io.hammerhead.karooext.MANIFEST_URL"

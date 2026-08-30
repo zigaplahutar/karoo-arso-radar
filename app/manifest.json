@@ -3,10 +3,10 @@
   "packageName": "si.plahutar.karooarsoradar",
   "iconUrl": "https://github.com/zigaplahutar/karoo-arso-radar/releases/latest/download/icon.png",
   "latestApkUrl": "https://github.com/zigaplahutar/karoo-arso-radar/releases/latest/download/karoo-arso-radar.apk",
-  "latestVersion": "1.0",
-  "latestVersionCode": 1,
+  "latestVersion": "1.1",
+  "latestVersionCode": 2,
   "developer": "Ziga Plahutar",
-  "description": "Prikaze zadnjo radarsko sliko padavin nad Slovenijo (vir: ARSO) kot podatkovno polje na strani med voznjo. Slika se osvezuje samodejno, dokler ima Karoo internetno povezavo (WiFi ali Companion aplikacija).",
-  "releaseNotes": "Prva razlicica.",
+  "description": "Prikaze zadnjo radarsko sliko padavin nad Slovenijo (vir: ARSO) kot podatkovno polje na strani med voznjo. Pod sliko so gumbi za povecavo, animacijo zadnjih 90 minut in rocno osvezitev.",
+  "releaseNotes": "Gumbi za povecavo, predvajanje animacije zadnjih 90 minut in rocno osvezitev. Slika se ne osvezuje vec sama - samo na gumb.",
   "tags": ["weather"]
 }

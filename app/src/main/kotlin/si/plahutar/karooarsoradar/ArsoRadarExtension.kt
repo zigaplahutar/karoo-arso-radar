@@ -10,12 +10,12 @@ import io.hammerhead.karooext.extension.KarooExtension
  *
  * Prvi argument mora biti enak atributu id v res/xml/extension_info.xml.
  */
-class ArsoRadarExtension : KarooExtension("arso-radar", "1.0") {
+class ArsoRadarExtension : KarooExtension("arso-radar", "1.1") {
 
     private val karooSystem by lazy { KarooSystemService(applicationContext) }
 
     override val types by lazy {
-        listOf(RadarDataType(karooSystem, extension))
+        listOf(RadarDataType(extension))
     }
 
     override fun onCreate() {
@@ -23,9 +23,13 @@ class ArsoRadarExtension : KarooExtension("arso-radar", "1.0") {
         karooSystem.connect { connected ->
             Log.d("ArsoRadar", "Povezava s Karoo sistemom: $connected")
         }
+        RadarRepository.karooSystem = karooSystem
     }
 
     override fun onDestroy() {
+        if (RadarRepository.karooSystem === karooSystem) {
+            RadarRepository.karooSystem = null
+        }
         karooSystem.disconnect()
         super.onDestroy()
     }

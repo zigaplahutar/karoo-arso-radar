@@ -5,7 +5,6 @@ import android.graphics.Bitmap
 import android.util.Log
 import android.view.View
 import android.widget.RemoteViews
-import io.hammerhead.karooext.KarooSystemService
 import io.hammerhead.karooext.extension.DataTypeImpl
 import io.hammerhead.karooext.internal.ViewEmitter
 import io.hammerhead.karooext.models.ShowCustomStreamState
@@ -14,8 +13,6 @@ import io.hammerhead.karooext.models.ViewConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.awaitCancellation
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -24,31 +21,27 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 
 /**
- * Graficno podatkovno polje z zadnjo radarsko sliko.
+ * Graficno podatkovno polje z radarsko sliko in stirimi gumbi: - + play osvezi.
  *
- * Karoo poklice [startView], ko je polje na zaslonu, in preklice, ko ni vec -
- * prenosi tako sami od sebe ugasnejo, ko strani ne gledas.
+ * Karoo poklice [startView], ko je polje na zaslonu, in preklice, ko ni vec.
+ * Ob preklicu ustavimo animacijo - ko strani ne gledas, se ne dogaja nic.
  */
-class RadarDataType(
-    private val karooSystem: KarooSystemService,
-    extension: String,
-) : DataTypeImpl(extension, "radar") {
+class RadarDataType(extension: String) : DataTypeImpl(extension, "radar") {
 
     private companion object {
         const val TAG = "ArsoRadar"
 
-        /** Kako pogosto preverimo, ali je cas za novo sliko (pogostost prenosa omeji RadarRepository). */
-        const val TICK_MS = 20_000L
-
         /**
-         * Obrez slike v delezih sirine/visine, ce hoces vreci stran robove
-         * (npr. legendo ali napis). Privzeto pokazemo celo sliko - najprej poglej,
-         * kako izgleda na napravi, sele potem rezi.
+         * Obrez robov slike v delezih sirine/visine, ce hoces vreci stran okolico.
+         * Privzeto pokazemo celo sliko.
          */
         const val CROP_LEFT = 0.0f
         const val CROP_TOP = 0.0f
         const val CROP_RIGHT = 0.0f
         const val CROP_BOTTOM = 0.0f
+
+        /** Priblizen delez visine polja, ki ostane sliki (ostalo vzamejo gumbi). */
+        const val IMAGE_HEIGHT_RATIO = 0.78f
     }
 
     private val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
@@ -57,19 +50,15 @@ class RadarDataType(
         Log.d(TAG, "startView, velikost polja ${config.viewSize}, predogled=${config.preview}")
         val scope = CoroutineScope(Dispatchers.IO)
 
-        // Brez glave (ikona + ime polja) in brez standardnega besedila o stanju -
-        // sliko hocemo cez celo polje.
         val configJob = scope.launch {
             emitter.onNext(UpdateGraphicConfig(showHeader = false))
             emitter.onNext(ShowCustomStreamState("", null))
             awaitCancellation()
         }
 
-        val refreshJob = scope.launch {
-            while (isActive) {
-                RadarRepository.refresh(karooSystem)
-                delay(TICK_MS)
-            }
+        // Prvi prikaz: sliko potegnemo enkrat. Potem samo se na gumb.
+        if (!config.preview && !RadarRepository.hasImage()) {
+            scope.launch { RadarRepository.refresh() }
         }
 
         val viewJob = scope.launch {
@@ -80,8 +69,8 @@ class RadarDataType(
 
         emitter.setCancellable {
             Log.d(TAG, "stopView")
+            RadarRepository.stopPlay()
             configJob.cancel()
-            refreshJob.cancel()
             viewJob.cancel()
         }
     }
@@ -92,7 +81,7 @@ class RadarDataType(
         state: RadarRepository.State,
     ): RemoteViews {
         val views = RemoteViews(context.packageName, R.layout.radar_field)
-        val bitmap = state.bitmap?.let { fitToField(it, config) }
+        val bitmap = state.frame?.let { fitToField(it, config, state.zoom) }
 
         if (bitmap != null) {
             views.setImageViewBitmap(R.id.radar_image, bitmap)
@@ -102,9 +91,9 @@ class RadarDataType(
         }
 
         val message = when {
-            bitmap != null -> null
-            state.loading -> context.getString(R.string.loading)
-            else -> context.getString(R.string.no_connection)
+            state.loading && bitmap == null -> context.getString(R.string.loading)
+            bitmap == null -> context.getString(R.string.no_connection)
+            else -> null
         }
         if (message != null) {
             views.setTextViewText(R.id.radar_status, message)
@@ -113,47 +102,98 @@ class RadarDataType(
             views.setViewVisibility(R.id.radar_status, View.GONE)
         }
 
-        // Cas zadnjega uspesnega prenosa; ce zadnji poskus ni uspel, dodamo klicaj.
-        val fetchedAt = state.fetchedAtMs
-        if (bitmap != null && fetchedAt != null) {
-            val caption = timeFormat.format(Date(fetchedAt)) + if (state.failed) " !" else ""
+        // Napis v kotu: med animacijo stevec slicic, sicer cas zadnjega prenosa.
+        val caption = when {
+            bitmap == null -> null
+            state.playing && state.frameCount > 0 -> "${state.frameIndex}/${state.frameCount}"
+            state.loading -> "…"
+            state.fetchedAtMs != null -> {
+                val zoomLabel = if (state.zoom > 1f) "  ${state.zoom}x" else ""
+                timeFormat.format(Date(state.fetchedAtMs)) +
+                    (if (state.failed) " !" else "") + zoomLabel
+            }
+            else -> null
+        }
+        if (caption != null) {
             views.setTextViewText(R.id.radar_caption, caption)
             views.setViewVisibility(R.id.radar_caption, View.VISIBLE)
         } else {
             views.setViewVisibility(R.id.radar_caption, View.GONE)
         }
 
+        views.setTextViewText(R.id.btn_play, if (state.playing) "■" else "▶")
+
+        // V predogledu (urejanje profila) gumbi ne smejo delovati.
+        if (!config.preview) {
+            views.setOnClickPendingIntent(
+                R.id.btn_zoom_out,
+                RadarCommandReceiver.pendingIntent(context, RadarCommandReceiver.CMD_ZOOM_OUT),
+            )
+            views.setOnClickPendingIntent(
+                R.id.btn_zoom_in,
+                RadarCommandReceiver.pendingIntent(context, RadarCommandReceiver.CMD_ZOOM_IN),
+            )
+            views.setOnClickPendingIntent(
+                R.id.btn_play,
+                RadarCommandReceiver.pendingIntent(context, RadarCommandReceiver.CMD_PLAY),
+            )
+            views.setOnClickPendingIntent(
+                R.id.btn_refresh,
+                RadarCommandReceiver.pendingIntent(context, RadarCommandReceiver.CMD_REFRESH),
+            )
+        }
+
         return views
     }
 
     /**
-     * Obreze in pomanjsa sliko na velikost polja. Pomembno: bitmap potuje cez
-     * procesno mejo do Karoo OS, zato ga ne posiljamo vecjega, kot ga polje potrebuje.
+     * Obreze (fiksni obrez robov + zoom na sredino) in pomanjsa sliko na velikost polja.
+     * Pomembno: bitmap potuje cez procesno mejo do Karoo OS, zato ga ne posiljamo
+     * vecjega, kot ga polje potrebuje.
      */
-    private fun fitToField(source: Bitmap, config: ViewConfig): Bitmap {
-        val cropX = (source.width * CROP_LEFT).roundToInt()
-        val cropY = (source.height * CROP_TOP).roundToInt()
-        val cropWidth = (source.width * (1f - CROP_LEFT - CROP_RIGHT)).roundToInt()
-        val cropHeight = (source.height * (1f - CROP_TOP - CROP_BOTTOM)).roundToInt()
+    private fun fitToField(source: Bitmap, config: ViewConfig, zoom: Float): Bitmap {
+        var working = source
 
-        val cropped = if (cropWidth in 1 until source.width || cropHeight in 1 until source.height) {
-            Bitmap.createBitmap(source, cropX, cropY, cropWidth, cropHeight)
-        } else {
-            source
+        // 1. fiksni obrez robov
+        val edgeWidth = (source.width * (1f - CROP_LEFT - CROP_RIGHT)).roundToInt()
+        val edgeHeight = (source.height * (1f - CROP_TOP - CROP_BOTTOM)).roundToInt()
+        if (edgeWidth in 1 until source.width || edgeHeight in 1 until source.height) {
+            working = Bitmap.createBitmap(
+                working,
+                (source.width * CROP_LEFT).roundToInt(),
+                (source.height * CROP_TOP).roundToInt(),
+                edgeWidth,
+                edgeHeight,
+            )
         }
 
+        // 2. zoom - izrez na sredini slike
+        if (zoom > 1f) {
+            val zoomWidth = (working.width / zoom).roundToInt().coerceAtLeast(1)
+            val zoomHeight = (working.height / zoom).roundToInt().coerceAtLeast(1)
+            working = Bitmap.createBitmap(
+                working,
+                (working.width - zoomWidth) / 2,
+                (working.height - zoomHeight) / 2,
+                zoomWidth,
+                zoomHeight,
+            )
+        }
+
+        // 3. pomanjsanje na velikost polja
         val targetWidth = config.viewSize.first.takeIf { it > 0 } ?: 400
-        val targetHeight = config.viewSize.second.takeIf { it > 0 } ?: 400
+        val targetHeight = ((config.viewSize.second.takeIf { it > 0 } ?: 400) * IMAGE_HEIGHT_RATIO)
+            .roundToInt().coerceAtLeast(1)
         val scale = min(
-            targetWidth.toFloat() / cropped.width,
-            targetHeight.toFloat() / cropped.height,
+            targetWidth.toFloat() / working.width,
+            targetHeight.toFloat() / working.height,
         )
-        if (scale >= 1f) return cropped
+        if (scale >= 1f) return working
 
         return Bitmap.createScaledBitmap(
-            cropped,
-            (cropped.width * scale).roundToInt().coerceAtLeast(1),
-            (cropped.height * scale).roundToInt().coerceAtLeast(1),
+            working,
+            (working.width * scale).roundToInt().coerceAtLeast(1),
+            (working.height * scale).roundToInt().coerceAtLeast(1),
             true,
         )
     }

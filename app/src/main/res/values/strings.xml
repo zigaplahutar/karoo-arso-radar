@@ -7,5 +7,5 @@
     <string name="loading">Nalagam radarsko sliko&#8230;</string>
     <string name="no_connection">Ni povezave</string>
     <string name="refresh">Osveži</string>
-    <string name="howto">Polje »Radar padavin« dodaj na podatkovno stran: Profili → izberi profil → uredi stran → dodaj podatkovno polje → ARSO Radar.\n\nSlika se osveži približno vsaki 2 minuti, dokler ima Karoo internet (WiFi ali Companion aplikacija na telefonu).\n\nVir podatkov: ARSO (meteo.si).</string>
+    <string name="howto">Gumbi: − in + povečava, ▶ animacija zadnjih 90 minut, ↻ prenos nove slike.\n\nSlika se ne osvežuje sama — samo ob prvem odprtju in ko pritisneš ↻.\n\nVir podatkov: ARSO (meteo.si).</string>
 </resources>
