@@ -95,6 +95,7 @@ class RadarDataType(extension: String) : DataTypeImpl(extension, "radar") {
         }
 
         val message = when {
+            bitmap == null && state.progress != null -> state.progress
             state.loading && bitmap == null -> context.getString(R.string.loading)
             bitmap == null -> context.getString(R.string.no_connection)
             else -> null
@@ -109,6 +110,7 @@ class RadarDataType(extension: String) : DataTypeImpl(extension, "radar") {
         val caption = when {
             bitmap == null -> null
             state.playing && state.frameCount > 0 -> "${state.frameIndex}/${state.frameCount}"
+            state.progress != null -> state.progress
             else -> buildString {
                 append(state.fetchedAtMs?.let { timeFormat.format(Date(it)) } ?: "-")
                 if (state.failed) append(" !")

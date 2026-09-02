@@ -22,6 +22,15 @@
         android:textColor="#FFFFFF"
         android:textSize="12sp" />
 
+    <TextView
+        android:id="@+id/diagnostic"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:paddingBottom="4dp"
+        android:textColor="#7C8698"
+        android:textSize="10sp" />
+
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"

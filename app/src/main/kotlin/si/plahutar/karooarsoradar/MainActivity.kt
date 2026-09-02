@@ -29,6 +29,7 @@ class MainActivity : AppCompatActivity() {
 
         val radarView = findViewById<RadarImageView>(R.id.radar_view)
         val status = findViewById<TextView>(R.id.status)
+        val diagnostic = findViewById<TextView>(R.id.diagnostic)
         val playButton = findViewById<TextView>(R.id.btn_play)
 
         findViewById<TextView>(R.id.btn_zoom_out).setOnClickListener { radarView.zoomBy(0.5f) }
@@ -52,8 +53,10 @@ class MainActivity : AppCompatActivity() {
                         radarView.centerOnMarker()
                     }
 
+                    diagnostic.text = state.diagnostic.orEmpty()
                     playButton.text = if (state.playing) "■" else "▶"
                     status.text = when {
+                        state.progress != null -> state.progress
                         state.loading && frame == null -> getString(R.string.loading)
                         frame == null -> getString(R.string.no_connection)
                         state.playing && state.frameCount > 0 ->

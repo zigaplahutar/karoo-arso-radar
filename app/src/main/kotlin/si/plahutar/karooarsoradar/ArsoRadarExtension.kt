@@ -10,7 +10,7 @@ import io.hammerhead.karooext.extension.KarooExtension
  *
  * Prvi argument mora biti enak atributu id v res/xml/extension_info.xml.
  */
-class ArsoRadarExtension : KarooExtension("arso-radar", "1.2") {
+class ArsoRadarExtension : KarooExtension("arso-radar", "1.3") {
 
     private val karooSystem by lazy { KarooSystemService(applicationContext) }
 

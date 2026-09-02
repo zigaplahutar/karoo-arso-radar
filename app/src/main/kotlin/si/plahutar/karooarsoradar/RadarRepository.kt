@@ -18,20 +18,17 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 /**
- * En sam vir resnice za celo aplikacijo: podatkovno polje in glavni zaslon
- * gledata isto sliko, isto lokacijo in isto stanje.
+ * En sam vir resnice za celo aplikacijo.
  *
- * Prenos se NE dogaja sam od sebe - samo ob prvem prikazu in ob pritisku na gumb
- * za osvezitev. Ko polje ni na zaslonu, se ne dogaja nic.
+ * Obicajno prenasamo samo zadnjo sliko (~13 kB). Animacijo zadnjih 90 minut
+ * (nekaj sto kB) prenesemo sele ob pritisku na play.
+ *
+ * Prenos se NE dogaja sam od sebe - samo ob prvem prikazu in ob pritisku na gumb.
  */
 object RadarRepository {
 
     private const val TAG = "ArsoRadar"
 
-    /**
-     * Stopnje povecave. En piksel slike je ~500 m, torej je pri 8x izrez
-     * priblizno 50 km sirok - to je merilo, ki med voznjo nekaj pove.
-     */
     val ZOOM_LEVELS = floatArrayOf(1f, 2f, 4f, 8f)
 
     private const val FRAME_DELAY_MS = 260L
@@ -49,6 +46,10 @@ object RadarRepository {
         val frameIndex: Int = 0,
         val frameCount: Int = 0,
         val location: Location? = null,
+        /** Kaj se trenutno dogaja med prenosom. */
+        val progress: String? = null,
+        /** Katera pot je uspela oziroma zakaj ni - vidno na zaslonu aplikacije. */
+        val diagnostic: String? = null,
     ) {
         val zoom: Float get() = ZOOM_LEVELS[zoomIndex.coerceIn(0, ZOOM_LEVELS.lastIndex)]
     }
@@ -64,10 +65,11 @@ object RadarRepository {
     private var playJob: Job? = null
     private var locationConsumerId: String? = null
 
-    /** Cel GIF ostane v pomnilniku - v njem je vseh 90 minut animacije. */
-    private var gifBytes: ByteArray? = null
+    /** Zadnja slika (ena slicica) in animacija (vseh 90 minut) locena. */
+    private var staticBytes: ByteArray? = null
+    private var animationBytes: ByteArray? = null
 
-    fun hasImage(): Boolean = gifBytes != null
+    fun hasImage(): Boolean = staticBytes != null
 
     // --- lokacija ----------------------------------------------------------
 
@@ -98,19 +100,16 @@ object RadarRepository {
         _state.update { it.copy(zoomIndex = (it.zoomIndex - 1).coerceAtLeast(0)) }
     }
 
-    /** Play/stop. Prenosa ne potrebuje - vse slicice so ze v prenesenem GIF-u. */
+    /** Play/stop. Ce animacije se nimamo, jo najprej prenesemo. */
     fun togglePlay() {
         if (playJob?.isActive == true) {
             stopPlay()
             return
         }
         playJob = scope.launch {
-            val bytes = gifBytes ?: run {
-                refresh(force = true)
-                gifBytes
-            } ?: return@launch
+            val bytes = animationBytes ?: downloadAnimation() ?: return@launch
 
-            _state.update { it.copy(playing = true) }
+            _state.update { it.copy(playing = true, progress = null) }
             try {
                 GifFrames.forEachFrame(bytes) { frame, index, count ->
                     _state.update {
@@ -132,18 +131,26 @@ object RadarRepository {
 
     // --- prenos ------------------------------------------------------------
 
+    /** Zadnja slika. [force] = pritisk na gumb. */
     suspend fun refresh(force: Boolean = false) {
         mutex.withLock {
-            if (!force && gifBytes != null) return
+            if (!force && staticBytes != null) return
 
-            _state.update { it.copy(loading = true) }
+            _state.update { it.copy(loading = true, progress = RadarDownloader.PROGRESS_DOWNLOADING) }
 
-            val bytes = RadarDownloader.download(karooSystem)
-            val frame = bytes?.let { GifFrames.lastFrame(it) }
+            val result = RadarDownloader.download(
+                karooSystem = karooSystem,
+                animation = false,
+                onProgress = { text -> _state.update { it.copy(progress = text) } },
+                onDiagnostic = { text -> _state.update { it.copy(diagnostic = text) } },
+            )
+            val frame = result?.let { GifFrames.lastFrame(it.bytes) }
 
-            if (bytes != null && frame != null) {
-                gifBytes = bytes
-                Log.d(TAG, "Nova radarska slika: ${frame.width}x${frame.height}, ${bytes.size} B")
+            if (result != null && frame != null) {
+                staticBytes = result.bytes
+                // Animacija je zdaj zastarela; naslednji play jo potegne na novo.
+                animationBytes = null
+                Log.d(TAG, "Nova slika prek ${result.via}: ${frame.width}x${frame.height}")
                 _state.update {
                     it.copy(
                         frame = frame,
@@ -152,12 +159,27 @@ object RadarRepository {
                         failed = false,
                         frameIndex = 0,
                         frameCount = 0,
+                        progress = null,
                     )
                 }
             } else {
-                Log.w(TAG, "Radarske slike ni bilo mogoce pridobiti")
-                _state.update { it.copy(loading = false, failed = true) }
+                Log.w(TAG, "Slike ni bilo mogoce pridobiti")
+                // Staro sliko obdrzimo - bolje stara slika kot prazen zaslon.
+                _state.update { it.copy(loading = false, failed = true, progress = null) }
             }
         }
+    }
+
+    private suspend fun downloadAnimation(): ByteArray? {
+        _state.update { it.copy(loading = true, progress = "Prenašam animacijo…") }
+        val result = RadarDownloader.download(
+            karooSystem = karooSystem,
+            animation = true,
+            onProgress = { text -> _state.update { it.copy(progress = text) } },
+            onDiagnostic = { text -> _state.update { it.copy(diagnostic = text) } },
+        )
+        _state.update { it.copy(loading = false, progress = null, failed = result == null) }
+        animationBytes = result?.bytes
+        return animationBytes
     }
 }
