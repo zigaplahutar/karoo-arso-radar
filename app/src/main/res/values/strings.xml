@@ -7,9 +7,10 @@
     <string name="loading">Nalagam radarsko sliko&#8230;</string>
     <string name="no_connection">Ni povezave</string>
     <string name="refresh">Osveži</string>
-    <string name="animation_progress">Animacija %1$d/%2$d</string>
+    <string name="animation_progress">▶ %1$s  (%2$d/%3$d)</string>
+    <string name="stored_frames">%1$d sličic / %2$d min</string>
     <string name="fetched_at">Preneseno ob %1$s</string>
     <string name="last_attempt_failed">(zadnji poskus ni uspel)</string>
     <string name="no_gps">(brez GPS)</string>
-    <string name="howto">Tu lahko sliko premikaš s prstom, dvojni tap približa ali oddalji.\n\nGumbi: − in + povečava, ▶ animacija zadnjih 90 minut, ↻ prenos nove slike.\n\nRdeč krogec je tvoja lokacija. Na podatkovnem polju med vožnjo se povečava reže okoli tebe.\n\nSlika se ne osvežuje sama — samo ob prvem odprtju in ko pritisneš ↻.\n\nVir podatkov: ARSO (meteo.si).</string>
+    <string name="howto">Slika se osveži sama vsakih 5 minut, tako kot jo objavlja ARSO — med vožnjo, na pavzi in v mirovanju, dokler je Karoo prižgan.\n\nVsaka prenesena slika se shrani za uro in pol nazaj, zato se animacija sestavi sama, brez dodatnega prenosa. Pritisni ▶ in predvajala se bo tvoja lastna zgodovina.\n\nGumbi: − in + povečava, ▶ animacija, ↻ takojšen prenos nove slike.\n\nSliko premikaš s prstom, dvojni tap približa ali oddalji. Rdeč krogec je tvoja lokacija.\n\nVir podatkov: ARSO (meteo.si).</string>
 </resources>

@@ -26,6 +26,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+        RadarRepository.init(this)
 
         val radarView = findViewById<RadarImageView>(R.id.radar_view)
         val status = findViewById<TextView>(R.id.status)
@@ -39,9 +40,6 @@ class MainActivity : AppCompatActivity() {
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
-                if (!RadarRepository.hasImage()) {
-                    launch { RadarRepository.refresh() }
-                }
                 RadarRepository.state.collect { state ->
                     val frame = state.frame
                     val marker = frame?.let { bitmap ->
@@ -59,11 +57,21 @@ class MainActivity : AppCompatActivity() {
                         state.progress != null -> state.progress
                         state.loading && frame == null -> getString(R.string.loading)
                         frame == null -> getString(R.string.no_connection)
-                        state.playing && state.frameCount > 0 ->
-                            getString(R.string.animation_progress, state.frameIndex, state.frameCount)
+                        state.playing && state.playingFrameTimeMs != null ->
+                            getString(
+                                R.string.animation_progress,
+                                timeFormat.format(Date(state.playingFrameTimeMs)),
+                                state.playingIndex,
+                                state.storedFrames,
+                            )
                         else -> {
                             val time = state.fetchedAtMs?.let { timeFormat.format(Date(it)) } ?: "-"
-                            val base = getString(R.string.fetched_at, time)
+                            val stored = if (state.storedFrames >= 2) {
+                                "  ${getString(R.string.stored_frames, state.storedFrames, state.storedSpanMinutes)}"
+                            } else {
+                                ""
+                            }
+                            val base = getString(R.string.fetched_at, time) + stored
                             when {
                                 state.failed -> "$base  ${getString(R.string.last_attempt_failed)}"
                                 state.location == null -> "$base  ${getString(R.string.no_gps)}"
@@ -80,6 +88,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
+        RadarRepository.addClient()
         if (RadarRepository.karooSystem == null) {
             karooSystem.connect()
             RadarRepository.karooSystem = karooSystem
@@ -90,6 +99,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStop() {
         RadarRepository.stopPlay()
+        RadarRepository.removeClient()
         if (ownsKarooSystem) {
             RadarRepository.stopLocationUpdates(karooSystem)
             if (RadarRepository.karooSystem === karooSystem) {

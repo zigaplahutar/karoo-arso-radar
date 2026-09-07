@@ -45,8 +45,10 @@ class RadarDataType(extension: String) : DataTypeImpl(extension, "radar") {
             awaitCancellation()
         }
 
-        if (!config.preview && !RadarRepository.hasImage()) {
-            scope.launch { RadarRepository.refresh() }
+        if (!config.preview) {
+            RadarRepository.init(context)
+            // Dokler je polje na zaslonu, se slika osvezuje sama.
+            RadarRepository.addClient()
         }
 
         val viewJob = scope.launch {
@@ -57,7 +59,7 @@ class RadarDataType(extension: String) : DataTypeImpl(extension, "radar") {
 
         emitter.setCancellable {
             Log.d(TAG, "stopView")
-            RadarRepository.stopPlay()
+            if (!config.preview) RadarRepository.removeClient()
             configJob.cancel()
             viewJob.cancel()
         }
@@ -109,14 +111,16 @@ class RadarDataType(extension: String) : DataTypeImpl(extension, "radar") {
 
         val caption = when {
             bitmap == null -> null
-            state.playing && state.frameCount > 0 -> "${state.frameIndex}/${state.frameCount}"
+            // Med animacijo pise cas slicice, ne stevilka - to je uporabnejse.
+            state.playing && state.playingFrameTimeMs != null ->
+                "▶ ${timeFormat.format(Date(state.playingFrameTimeMs))}"
             state.progress != null -> state.progress
             else -> buildString {
                 append(state.fetchedAtMs?.let { timeFormat.format(Date(it)) } ?: "-")
                 if (state.failed) append(" !")
                 if (state.zoom > 1f) append("  ${state.zoom.roundToInt()}x")
-                // Ce smo povecali, pa markerja ni, uporabnik mora vedeti zakaj.
                 if (state.zoom > 1f && marker == null) append("  brez GPS")
+                if (state.storedFrames >= 2) append("  ${state.storedFrames}⏵")
             }
         }
         if (caption != null) {

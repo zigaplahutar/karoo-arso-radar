@@ -4,8 +4,9 @@
     android:layout_height="match_parent"
     android:background="#000000"
     android:orientation="vertical"
-    android:padding="6dp">
+    android:padding="3dp">
 
+    <!-- Slika dobi ves prostor, ki ostane. -->
     <si.plahutar.karooarsoradar.RadarImageView
         android:id="@+id/radar_view"
         android:layout_width="match_parent"
@@ -17,8 +18,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:gravity="center"
-        android:paddingTop="4dp"
-        android:paddingBottom="4dp"
+        android:paddingTop="3dp"
         android:textColor="#FFFFFF"
         android:textSize="12sp" />
 
@@ -27,10 +27,10 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:gravity="center"
-        android:maxLines="4"
-        android:paddingBottom="4dp"
+        android:maxLines="2"
+        android:paddingBottom="3dp"
         android:textColor="#7C8698"
-        android:textSize="10sp" />
+        android:textSize="9sp" />
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -94,11 +94,20 @@
             android:textSize="22sp" />
     </LinearLayout>
 
-    <TextView
+    <!-- Navodila so pod gumbi in se scrollajo, da ne jemljejo prostora sliki. -->
+    <ScrollView
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:paddingTop="6dp"
-        android:text="@string/howto"
-        android:textColor="#BBBBBB"
-        android:textSize="11sp" />
+        android:layout_height="78dp"
+        android:fillViewport="false"
+        android:scrollbars="vertical">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="5dp"
+            android:paddingBottom="5dp"
+            android:text="@string/howto"
+            android:textColor="#BBBBBB"
+            android:textSize="11sp" />
+    </ScrollView>
 </LinearLayout>

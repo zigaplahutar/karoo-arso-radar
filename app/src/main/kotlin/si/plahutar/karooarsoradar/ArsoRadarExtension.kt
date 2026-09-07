@@ -10,7 +10,7 @@ import io.hammerhead.karooext.extension.KarooExtension
  *
  * Prvi argument mora biti enak atributu id v res/xml/extension_info.xml.
  */
-class ArsoRadarExtension : KarooExtension("arso-radar", "1.4") {
+class ArsoRadarExtension : KarooExtension("arso-radar", "1.6") {
 
     private val karooSystem by lazy { KarooSystemService(applicationContext) }
 
@@ -23,11 +23,17 @@ class ArsoRadarExtension : KarooExtension("arso-radar", "1.4") {
         karooSystem.connect { connected ->
             Log.d("ArsoRadar", "Povezava s Karoo sistemom: $connected")
         }
+        RadarRepository.init(applicationContext)
         RadarRepository.karooSystem = karooSystem
         RadarRepository.startLocationUpdates(karooSystem)
+
+        // Zbiramo ves cas, ko je razsiritev ziva: med voznjo, na pavzi in v mirovanju.
+        // Tako je animacija ob pritisku na play res polna.
+        RadarRepository.addClient()
     }
 
     override fun onDestroy() {
+        RadarRepository.removeClient()
         RadarRepository.stopLocationUpdates(karooSystem)
         if (RadarRepository.karooSystem === karooSystem) {
             RadarRepository.karooSystem = null

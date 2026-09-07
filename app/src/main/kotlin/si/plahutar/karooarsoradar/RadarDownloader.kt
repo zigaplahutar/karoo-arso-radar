@@ -16,9 +16,10 @@ import java.net.URL
 /**
  * Prenese radarsko sliko ARSO.
  *
- * Dve datoteki:
- *  - si0-rm.gif       zadnja slika, ~13 kB - obicajni prikaz
- *  - si0-rm-anim.gif  animacija zadnjih 90 minut, nekaj sto kB - samo ob play
+ * Prenasamo samo zadnjo sliko si0-rm.gif (~13 kB). Celotne animacije z ARSO
+ * (nekaj sto kB) ne prenasamo: prek Companiona povezava zmore priblizno kilobajt
+ * na sekundo, kar bi pomenilo vec minut cakanja. Animacijo si sestavimo sami iz
+ * shranjenih slik (glej RadarFrameStore).
  *
  * Dve poti:
  *  1. Karoo HTTP API - edina pot, ki dela tudi prek Companion aplikacije na telefonu.
@@ -33,19 +34,13 @@ object RadarDownloader {
 
     const val STATIC_URL =
         "https://meteo.arso.gov.si/uploads/probase/www/observ/radar/si0-rm.gif"
-    const val ANIMATION_URL =
-        "https://meteo.arso.gov.si/uploads/probase/www/observ/radar/si0-rm-anim.gif"
 
     private const val TAG = "ArsoRadar"
     private const val USER_AGENT = "karoo-arso-radar"
 
-    private const val CHUNK_SIZE = 60_000
-    private const val MAX_CHUNKS = 12
     private const val MAX_TOTAL_BYTES = 6_000_000
 
     private const val STATIC_TIMEOUT_MS = 90_000L
-    private const val ANIMATION_TIMEOUT_MS = 180_000L
-    private const val CHUNK_TIMEOUT_MS = 120_000L
 
     const val PROGRESS_WAITING = "Čakam na povezavo…"
     const val PROGRESS_DOWNLOADING = "Prenašam…"
@@ -81,39 +76,6 @@ object RadarDownloader {
 
         onProgress(PROGRESS_DOWNLOADING)
         attempt(diagnostics, "WiFi") { directRequest(STATIC_URL) }
-            ?.let { onDiagnostic(diagnostics.toString()); return Download(it, "WiFi") }
-
-        onDiagnostic(diagnostics.toString())
-        return null
-    }
-
-    // --- animacija (velika) -------------------------------------------------
-
-    suspend fun downloadAnimation(
-        karooSystem: KarooSystemService?,
-        onProgress: (String) -> Unit = {},
-        onDiagnostic: (String) -> Unit = {},
-    ): Download? {
-        val diagnostics = Diagnostics()
-
-        if (karooSystem != null) {
-            // 1. Naravnost, brez Range. Ce posrednik prenese velik odgovor, je to
-            //    najhitrejsa pot - en sam obhod namesto sestih.
-            onProgress("Prenašam animacijo…")
-            attempt(diagnostics, "cela") {
-                singleRequest(karooSystem, ANIMATION_URL, emptyMap(), ANIMATION_TIMEOUT_MS, onProgress)
-            }?.let { onDiagnostic(diagnostics.toString()); return Download(it, "Karoo cela") }
-
-            // 2. Po kosih z Range.
-            attempt(diagnostics, "kosi") {
-                chunkedRequest(karooSystem, ANIMATION_URL, diagnostics, onProgress)
-            }?.let { onDiagnostic(diagnostics.toString()); return Download(it, "Karoo po kosih") }
-        } else {
-            diagnostics.add("ni povezave s Karoo")
-        }
-
-        onProgress(PROGRESS_DOWNLOADING)
-        attempt(diagnostics, "WiFi") { directRequest(ANIMATION_URL) }
             ?.let { onDiagnostic(diagnostics.toString()); return Download(it, "WiFi") }
 
         onDiagnostic(diagnostics.toString())
@@ -173,61 +135,6 @@ object RadarDownloader {
         return response.body ?: error("prazno telo")
     }
 
-    private suspend fun chunkedRequest(
-        karooSystem: KarooSystemService,
-        url: String,
-        diagnostics: Diagnostics,
-        onProgress: (String) -> Unit,
-    ): ByteArray {
-        val out = ByteArrayOutputStream()
-        var offset = 0
-        var total: Int? = null
-
-        for (index in 0 until MAX_CHUNKS) {
-            val started = System.currentTimeMillis()
-            onProgress(
-                total?.let { "Animacija ${100 * offset / it}%" } ?: "Animacija, kos ${index + 1}",
-            )
-
-            val response = request(
-                karooSystem,
-                url,
-                mapOf(
-                    "User-Agent" to USER_AGENT,
-                    "Range" to "bytes=$offset-${offset + CHUNK_SIZE - 1}",
-                ),
-                CHUNK_TIMEOUT_MS,
-                onProgress,
-            ) ?: error("kos ${index + 1}: brez odgovora")
-
-            val seconds = (System.currentTimeMillis() - started) / 1000
-            response.error?.let { error("kos ${index + 1}: $it") }
-            val body = response.body ?: error("kos ${index + 1}: prazno telo")
-
-            if (index == 0) {
-                val range = header(response.headers, "Content-Range")
-                diagnostics.add(
-                    "kos1 ${response.statusCode} ${body.size / 1024}kB ${seconds}s " +
-                        (range?.let { "range=$it" } ?: "brez Content-Range"),
-                )
-            }
-
-            when (response.statusCode) {
-                206 -> {
-                    out.write(body)
-                    offset += body.size
-                    if (total == null) total = parseTotalLength(response.headers)
-                    if (body.isEmpty() || (total != null && offset >= total)) return out.toByteArray()
-                    if (offset > MAX_TOTAL_BYTES) error("preveliko")
-                }
-                // Streznik ali posrednik je Range prezrl in poslal vse naenkrat.
-                200 -> return body
-                else -> error("kos ${index + 1}: HTTP ${response.statusCode}")
-            }
-        }
-        error("prevec kosov")
-    }
-
     private suspend fun request(
         karooSystem: KarooSystemService,
         url: String,
@@ -258,13 +165,6 @@ object RadarDownloader {
             awaitClose { karooSystem.removeConsumer(listenerId) }
         }.first()
     }
-
-    private fun header(headers: Map<String, String>, name: String): String? =
-        headers.entries.firstOrNull { it.key.equals(name, ignoreCase = true) }?.value
-
-    /** Iz "bytes 0-59999/523456" potegne 523456. */
-    private fun parseTotalLength(headers: Map<String, String>): Int? =
-        header(headers, "Content-Range")?.substringAfter('/', "")?.trim()?.toIntOrNull()
 
     private fun directRequest(url: String): ByteArray {
         val connection = (URL(url).openConnection() as HttpURLConnection).apply {
