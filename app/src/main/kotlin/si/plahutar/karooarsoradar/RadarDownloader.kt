@@ -17,17 +17,17 @@ import java.net.URL
  * Prenese radarsko sliko ARSO.
  *
  * Dve datoteki:
- *  - si0-rm.gif       zadnja slika, ~13 kB - to je tisto, kar potrebujemo obicajno
- *  - si0-rm-anim.gif  animacija zadnjih 90 minut, nekaj sto kB - samo ob pritisku na play
+ *  - si0-rm.gif       zadnja slika, ~13 kB - obicajni prikaz
+ *  - si0-rm-anim.gif  animacija zadnjih 90 minut, nekaj sto kB - samo ob play
  *
  * Dve poti:
- *  1. Karoo HTTP API (OnHttpResponse.MakeHttpRequest) - edina pot, ki dela tudi takrat,
- *     ko internet priteka prek Companion aplikacije na telefonu. Zahtevo je treba dati
- *     v vrsto (waitForConnection = true), ker povezava s telefonom ni takoj pripravljena.
- *     Omejitev je 100 kB na telo odgovora; zadnja slika je krepko pod njo, animacijo
- *     poberemo po kosih z zaglavjem Range.
- *  2. Navadna HTTP povezava - deluje SAMO, ko je Karoo na WiFi. Prek Companiona
- *     omrezne poti ni, ker ta ni omrezni vmesnik, ampak posrednik zahtev.
+ *  1. Karoo HTTP API - edina pot, ki dela tudi prek Companion aplikacije na telefonu.
+ *     Zahteva mora cakati v vrsti (waitForConnection = true), sicer prek Bluetootha
+ *     takoj odpove. Omejitev 100 kB v SDK velja samo za telo ZAHTEVE, ne odgovora -
+ *     velik odgovor torej ni prepovedan, je pa prek Bluetootha pocasen.
+ *  2. Navadna HTTP povezava - deluje SAMO na WiFi (Companion ni omrezni vmesnik).
+ *
+ * Vsak poskus se belezi v [Diagnostics], da se na napravi vidi, kaj je odpovedalo.
  */
 object RadarDownloader {
 
@@ -37,77 +37,111 @@ object RadarDownloader {
         "https://meteo.arso.gov.si/uploads/probase/www/observ/radar/si0-rm-anim.gif"
 
     private const val TAG = "ArsoRadar"
-    private const val CHUNK_SIZE = 90_000
-    private const val MAX_TOTAL_BYTES = 6_000_000
     private const val USER_AGENT = "karoo-arso-radar"
 
-    /** Prek Bluetootha zahteva caka v vrsti, dokler se povezava s telefonom ne zbudi. */
-    private const val FIRST_REQUEST_TIMEOUT_MS = 90_000L
-    private const val CHUNK_TIMEOUT_MS = 60_000L
+    private const val CHUNK_SIZE = 60_000
+    private const val MAX_CHUNKS = 12
+    private const val MAX_TOTAL_BYTES = 6_000_000
 
-    /** Kaj se dogaja - gre na zaslon, da uporabnik ne bulji v "Nalagam". */
+    private const val STATIC_TIMEOUT_MS = 90_000L
+    private const val ANIMATION_TIMEOUT_MS = 180_000L
+    private const val CHUNK_TIMEOUT_MS = 120_000L
+
     const val PROGRESS_WAITING = "Čakam na povezavo…"
     const val PROGRESS_DOWNLOADING = "Prenašam…"
 
-    data class Download(
-        val bytes: ByteArray,
-        /** Kratek opis, katera pot je uspela - za diagnostiko na zaslonu. */
-        val via: String,
-    )
+    data class Download(val bytes: ByteArray, val via: String)
 
-    suspend fun download(
+    /** Zbira korake poskusa, da jih lahko prikazemo na zaslonu. */
+    private class Diagnostics {
+        private val steps = mutableListOf<String>()
+        fun add(step: String) {
+            steps += step
+            Log.d(TAG, "diag: $step")
+        }
+        override fun toString(): String = steps.joinToString(" · ")
+    }
+
+    // --- zadnja slika (majhna) ---------------------------------------------
+
+    suspend fun downloadStatic(
         karooSystem: KarooSystemService?,
-        animation: Boolean,
         onProgress: (String) -> Unit = {},
         onDiagnostic: (String) -> Unit = {},
     ): Download? {
-        val url = if (animation) ANIMATION_URL else STATIC_URL
-        val notes = StringBuilder()
+        val diagnostics = Diagnostics()
 
         if (karooSystem != null) {
-            // Zadnja slika je majhna, zato najprej navadna zahteva brez Range.
-            if (!animation) {
-                runCatching { singleRequest(karooSystem, url, onProgress) }
-                    .onFailure { notes.append("Karoo: ${it.message}; ") }
-                    .getOrNull()
-                    ?.let { bytes ->
-                        if (isCompleteGif(bytes)) {
-                            onDiagnostic("Karoo · ${bytes.size / 1024} kB")
-                            return Download(bytes, "Karoo")
-                        }
-                        notes.append("Karoo: nepopolna slika (${bytes.size} B); ")
-                    }
-            }
-
-            runCatching { chunkedRequest(karooSystem, url, onProgress) }
-                .onFailure { notes.append("kosi: ${it.message}; ") }
-                .getOrNull()
-                ?.let { bytes ->
-                    if (isCompleteGif(bytes)) {
-                        onDiagnostic("Karoo po kosih · ${bytes.size / 1024} kB")
-                        return Download(bytes, "Karoo po kosih")
-                    }
-                    notes.append("kosi: nepopolna slika (${bytes.size} B); ")
-                }
+            attempt(diagnostics, "Karoo") {
+                singleRequest(karooSystem, STATIC_URL, emptyMap(), STATIC_TIMEOUT_MS, onProgress)
+            }?.let { onDiagnostic(diagnostics.toString()); return Download(it, "Karoo") }
         } else {
-            notes.append("ni povezave s Karoo sistemom; ")
+            diagnostics.add("ni povezave s Karoo")
         }
 
         onProgress(PROGRESS_DOWNLOADING)
-        runCatching { directRequest(url) }
-            .onFailure { notes.append("WiFi: ${it.message}") }
-            .getOrNull()
-            ?.let { bytes ->
-                if (isCompleteGif(bytes)) {
-                    onDiagnostic("WiFi · ${bytes.size / 1024} kB")
-                    return Download(bytes, "WiFi")
-                }
-                notes.append("WiFi: nepopolna slika (${bytes.size} B)")
-            }
+        attempt(diagnostics, "WiFi") { directRequest(STATIC_URL) }
+            ?.let { onDiagnostic(diagnostics.toString()); return Download(it, "WiFi") }
 
-        Log.w(TAG, "Prenos ni uspel: $notes")
-        onDiagnostic(notes.toString().trim().ifEmpty { "prenos ni uspel" })
+        onDiagnostic(diagnostics.toString())
         return null
+    }
+
+    // --- animacija (velika) -------------------------------------------------
+
+    suspend fun downloadAnimation(
+        karooSystem: KarooSystemService?,
+        onProgress: (String) -> Unit = {},
+        onDiagnostic: (String) -> Unit = {},
+    ): Download? {
+        val diagnostics = Diagnostics()
+
+        if (karooSystem != null) {
+            // 1. Naravnost, brez Range. Ce posrednik prenese velik odgovor, je to
+            //    najhitrejsa pot - en sam obhod namesto sestih.
+            onProgress("Prenašam animacijo…")
+            attempt(diagnostics, "cela") {
+                singleRequest(karooSystem, ANIMATION_URL, emptyMap(), ANIMATION_TIMEOUT_MS, onProgress)
+            }?.let { onDiagnostic(diagnostics.toString()); return Download(it, "Karoo cela") }
+
+            // 2. Po kosih z Range.
+            attempt(diagnostics, "kosi") {
+                chunkedRequest(karooSystem, ANIMATION_URL, diagnostics, onProgress)
+            }?.let { onDiagnostic(diagnostics.toString()); return Download(it, "Karoo po kosih") }
+        } else {
+            diagnostics.add("ni povezave s Karoo")
+        }
+
+        onProgress(PROGRESS_DOWNLOADING)
+        attempt(diagnostics, "WiFi") { directRequest(ANIMATION_URL) }
+            ?.let { onDiagnostic(diagnostics.toString()); return Download(it, "WiFi") }
+
+        onDiagnostic(diagnostics.toString())
+        return null
+    }
+
+    /** Izvede poskus, izmeri cas in zabelezi izid. Vrne bajte le, ce je GIF popoln. */
+    private suspend fun attempt(
+        diagnostics: Diagnostics,
+        name: String,
+        block: suspend () -> ByteArray,
+    ): ByteArray? {
+        val started = System.currentTimeMillis()
+        return try {
+            val bytes = block()
+            val seconds = (System.currentTimeMillis() - started) / 1000
+            if (isCompleteGif(bytes)) {
+                diagnostics.add("$name ✓ ${bytes.size / 1024}kB ${seconds}s")
+                bytes
+            } else {
+                diagnostics.add("$name odrezan ${bytes.size / 1024}kB ${seconds}s")
+                null
+            }
+        } catch (throwable: Throwable) {
+            val seconds = (System.currentTimeMillis() - started) / 1000
+            diagnostics.add("$name ✗ ${throwable.message} ${seconds}s")
+            null
+        }
     }
 
     /** GIF se zacne z GIF8 in konca s trailerjem 0x3B; tako lovimo odrezan prenos. */
@@ -117,39 +151,44 @@ object RadarDownloader {
         return bytes[bytes.size - 1] == 0x3B.toByte()
     }
 
-    // --- pot 1a: ena zahteva prek Karoo -------------------------------------
+    // --- gradniki -----------------------------------------------------------
 
     private suspend fun singleRequest(
         karooSystem: KarooSystemService,
         url: String,
+        extraHeaders: Map<String, String>,
+        timeoutMs: Long,
         onProgress: (String) -> Unit,
     ): ByteArray {
         val response = request(
             karooSystem,
             url,
-            mapOf("User-Agent" to USER_AGENT),
-            FIRST_REQUEST_TIMEOUT_MS,
+            mapOf("User-Agent" to USER_AGENT) + extraHeaders,
+            timeoutMs,
             onProgress,
-        ) ?: error("brez odgovora v ${FIRST_REQUEST_TIMEOUT_MS / 1000} s")
+        ) ?: error("brez odgovora v ${timeoutMs / 1000}s")
 
         response.error?.let { error(it) }
         if (response.statusCode !in 200..299) error("HTTP ${response.statusCode}")
         return response.body ?: error("prazno telo")
     }
 
-    // --- pot 1b: po kosih z Range -------------------------------------------
-
     private suspend fun chunkedRequest(
         karooSystem: KarooSystemService,
         url: String,
+        diagnostics: Diagnostics,
         onProgress: (String) -> Unit,
     ): ByteArray {
         val out = ByteArrayOutputStream()
         var offset = 0
         var total: Int? = null
-        var first = true
 
-        while (true) {
+        for (index in 0 until MAX_CHUNKS) {
+            val started = System.currentTimeMillis()
+            onProgress(
+                total?.let { "Animacija ${100 * offset / it}%" } ?: "Animacija, kos ${index + 1}",
+            )
+
             val response = request(
                 karooSystem,
                 url,
@@ -157,13 +196,21 @@ object RadarDownloader {
                     "User-Agent" to USER_AGENT,
                     "Range" to "bytes=$offset-${offset + CHUNK_SIZE - 1}",
                 ),
-                if (first) FIRST_REQUEST_TIMEOUT_MS else CHUNK_TIMEOUT_MS,
+                CHUNK_TIMEOUT_MS,
                 onProgress,
-            ) ?: error("brez odgovora")
-            first = false
+            ) ?: error("kos ${index + 1}: brez odgovora")
 
-            response.error?.let { error(it) }
-            val body = response.body ?: error("prazno telo")
+            val seconds = (System.currentTimeMillis() - started) / 1000
+            response.error?.let { error("kos ${index + 1}: $it") }
+            val body = response.body ?: error("kos ${index + 1}: prazno telo")
+
+            if (index == 0) {
+                val range = header(response.headers, "Content-Range")
+                diagnostics.add(
+                    "kos1 ${response.statusCode} ${body.size / 1024}kB ${seconds}s " +
+                        (range?.let { "range=$it" } ?: "brez Content-Range"),
+                )
+            }
 
             when (response.statusCode) {
                 206 -> {
@@ -173,11 +220,12 @@ object RadarDownloader {
                     if (body.isEmpty() || (total != null && offset >= total)) return out.toByteArray()
                     if (offset > MAX_TOTAL_BYTES) error("preveliko")
                 }
-                // Streznik je Range ignoriral in poslal vse naenkrat.
+                // Streznik ali posrednik je Range prezrl in poslal vse naenkrat.
                 200 -> return body
-                else -> error("HTTP ${response.statusCode}")
+                else -> error("kos ${index + 1}: HTTP ${response.statusCode}")
             }
         }
+        error("prevec kosov")
     }
 
     private suspend fun request(
@@ -193,8 +241,8 @@ object RadarDownloader {
                     method = "GET",
                     url = url,
                     headers = headers,
-                    // Kljucno: prek Companiona povezava ni takoj na voljo, zato
-                    // mora zahteva pocakati v vrsti namesto da takoj odpove.
+                    // Prek Companiona povezava ni takoj na voljo, zato mora zahteva
+                    // pocakati v vrsti namesto da takoj odpove.
                     waitForConnection = true,
                 ),
             ) { event: OnHttpResponse ->
@@ -211,22 +259,18 @@ object RadarDownloader {
         }.first()
     }
 
-    /** Iz "bytes 0-89999/523456" potegne 523456. */
-    private fun parseTotalLength(headers: Map<String, String>): Int? =
-        headers.entries
-            .firstOrNull { it.key.equals("Content-Range", ignoreCase = true) }
-            ?.value
-            ?.substringAfter('/', "")
-            ?.trim()
-            ?.toIntOrNull()
+    private fun header(headers: Map<String, String>, name: String): String? =
+        headers.entries.firstOrNull { it.key.equals(name, ignoreCase = true) }?.value
 
-    // --- pot 2: navadna povezava (samo WiFi) --------------------------------
+    /** Iz "bytes 0-59999/523456" potegne 523456. */
+    private fun parseTotalLength(headers: Map<String, String>): Int? =
+        header(headers, "Content-Range")?.substringAfter('/', "")?.trim()?.toIntOrNull()
 
     private fun directRequest(url: String): ByteArray {
         val connection = (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
             connectTimeout = 15_000
-            readTimeout = 25_000
+            readTimeout = 30_000
             setRequestProperty("User-Agent", USER_AGENT)
         }
         try {

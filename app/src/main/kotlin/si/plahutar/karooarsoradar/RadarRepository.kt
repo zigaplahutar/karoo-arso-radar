@@ -138,9 +138,8 @@ object RadarRepository {
 
             _state.update { it.copy(loading = true, progress = RadarDownloader.PROGRESS_DOWNLOADING) }
 
-            val result = RadarDownloader.download(
+            val result = RadarDownloader.downloadStatic(
                 karooSystem = karooSystem,
-                animation = false,
                 onProgress = { text -> _state.update { it.copy(progress = text) } },
                 onDiagnostic = { text -> _state.update { it.copy(diagnostic = text) } },
             )
@@ -172,9 +171,8 @@ object RadarRepository {
 
     private suspend fun downloadAnimation(): ByteArray? {
         _state.update { it.copy(loading = true, progress = "Prenašam animacijo…") }
-        val result = RadarDownloader.download(
+        val result = RadarDownloader.downloadAnimation(
             karooSystem = karooSystem,
-            animation = true,
             onProgress = { text -> _state.update { it.copy(progress = text) } },
             onDiagnostic = { text -> _state.update { it.copy(diagnostic = text) } },
         )
